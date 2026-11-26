@@ -113,7 +113,7 @@ set_target_properties(RackResources PROPERTIES POSITION_INDEPENDENT_CODE ON)
 function(rack_configure target)
     target_sources(${target} PRIVATE
         Source/RackPatch.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
-        Source/WebBridge.cpp Source/WebRackView.cpp Source/NativeRack.cpp)
+        Source/WebBridge.cpp Source/WebRackView.cpp Source/NativeRack.cpp Source/CompactPanel.cpp)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
     if(RACK_WEB_UI)
         target_compile_definitions(${target} PRIVATE JUCE_WEB_BROWSER=1)

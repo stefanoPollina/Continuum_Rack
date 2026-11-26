@@ -464,7 +464,7 @@ void ContinuumRackProcessor::setStateInformation (const void* data, int size)
     const auto params = root.getChildWithName (parameters.state.getType());
     if (! params.isValid()) return;
 
-    editorView.store (juce::jlimit (0, 1, (int) root.getProperty ("view", 0)));
+    editorView.store (juce::jlimit (0, 2, (int) root.getProperty ("view", 0)));
     loadState (s, root.getProperty ("name").toString(), root.getProperty ("desc").toString(),
                (int) root.getProperty ("scene", -1), false);
     parameters.replaceState (params);

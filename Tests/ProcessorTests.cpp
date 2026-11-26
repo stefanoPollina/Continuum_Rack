@@ -434,8 +434,15 @@ void testEditor()
     check (ed != nullptr && ed->getWidth() == 1440 && ed->isResizable(), "editor opens resizable at 1440 x 900");
     if (auto* shell = dynamic_cast<ContinuumRackEditor*> (ed.get()))
     {
+        shell->showView (ContinuumRackEditor::panel);
+        check (p.editorView.load() == 2, "first-design panel selected");
+        juce::MemoryBlock mb2;
+        p.getStateInformation (mb2);
+        ContinuumRackProcessor q2;
+        q2.setStateInformation (mb2.getData(), (int) mb2.getSize());
+        check (q2.editorView.load() == 2, "panel view is saved with the project");
         shell->showView (1);
-        check (p.editorView.load() == 1, "native panel selected");
+        check (p.editorView.load() == 1, "native rack selected");
         juce::MemoryBlock mb;
         p.getStateInformation (mb);
         ContinuumRackProcessor q;
@@ -456,6 +463,16 @@ void testEditor()
         juce::FileOutputStream os (out);
         juce::PNGImageFormat().writeImageToStream (img, os);
         std::cout << "editor snapshot written to " << shot << "\n";
+        if (auto* shell = dynamic_cast<ContinuumRackEditor*> (ed.get()))
+        {
+            shell->showView (ContinuumRackEditor::panel);
+            auto pim = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            juce::File pf (juce::String (shot) + ".panel.png");
+            pf.deleteFile();
+            juce::FileOutputStream pos (pf);
+            juce::PNGImageFormat().writeImageToStream (pim, pos);
+            shell->showView (ContinuumRackEditor::nativeRack);
+        }
         if (auto* shell = dynamic_cast<ContinuumRackEditor*> (ed.get()))
             if (auto* nv = shell->getNativeView())
             {
