@@ -5,10 +5,22 @@
 Linux x86-64, GCC 13.3, CMake 3.28, Ninja, JUCE 8.0.12 (commit `29396c22`), Release build with LTO. The standalone target was left out of that build because ALSA headers weren't available; it is built on Windows and macOS.
 
 ```
-ctest: Rack.DSP ........ Passed   (80 checks)
-       Rack.Processor .. Passed   (320 checks)
+ctest: Rack.DSP ........ Passed   (89 checks)
+       Rack.Processor .. Passed   (362 checks)
        Rack.VST3Host ... Passed
+Tests/web/bridge_test.py  25 checks passed (headless Chrome 153, real page + bridge)
 ```
+
+Linux has no WebKitGTK development headers here, so that build was made with `RACK_WEB_UI=OFF`. The WebView code (`WebRackView.cpp`, and `PluginEditor.cpp` with the web view enabled) was compiled as a syntax check against the JUCE 8.0.12 headers with `JUCE_WEB_BROWSER=1`, but has not been linked or run.
+
+## Web rack view
+
+- **Page side** (`Tests/web/bridge_test.py`): the real page plus `plugin-bridge.js`, in headless Chrome, with a mock of JUCE's `window.__JUCE__.backend`. Checked: hello on start; the initial rack is pushed once, with no traffic while idle; scene loads, knob edits and DSP-editor edits reach the plugin; RUN SEQ, computer keys, PLAY BANK, audition and CORE SAVE send the right events; plugin status lights the RUN LED, playhead, engine LEDs and MIDI note; host automation and plugin loads update the page without echoing back; PANIC and KILL keep the page live; no page errors.
+- **Plugin side** (`RackWebBridge`, in the processor tests): a `rackState` payload captured from the real page (`Tests/Fixtures/page-rack-state.json`) applies to the rack and moves only the parameters that changed. Page edits are not echoed back. Host automation and host preset changes are sent to the page. Notes, drones, stop, panic, RUN and SAVE work. Status carries LEDs, meters and scopes. Malformed messages are ignored.
+
+## Native rack view
+
+The processor tests check that all 87 modules are laid out with over 600 controls, and that the following work: engine ON, inserts, host-parameter knobs, voice knobs, EDIT moving the DSP editor's focus, SEQ cells, cables (forward sends allowed, backward refused, LFO → MOD), ENGINE ATLAS load, SCENES, TRIG, STOP and RUN. Full-size snapshots were compared by eye with the web rack's own screenshots.
 
 ## Engine tests (`Tests/DSPTests.cpp`, no JUCE)
 
@@ -28,7 +40,7 @@ ctest: Rack.DSP ........ Passed   (80 checks)
 - **Host state:** every parameter, the rack, an edited slot, and the scene index and name are restored. The restored processor renders sample-identically. Malformed or truncated state leaves the rack unchanged.
 - **Web patch files:** the web app's own `example-two-bank-send.json` imports with its send and LFO cables and enabled engines. Export then import is exact, and the export uses `continuum-synth-p01`. Wrong format ids, patches without 8 banks and invalid JSON are refused. All 48 scenes round-trip through the patch format.
 - **Transport and MIDI:** stopped means silent, playing means the sequencer runs, and clock Off means silent. A MIDI note plays the rack with the sequencer off. A host block larger than the prepared size is rendered to its end. Mono output works.
-- **Editor:** opens at 1200 × 760. A headless snapshot is in `docs/editor.png`.
+- **Editor:** opens resizable at 1440 × 900, and the chosen view is saved with the project. Snapshots: `docs/native-rack.png`; `docs/web-rack.png` is the page with the bridge in Chrome.
 
 ## VST3 host check (`Tests/HostLoadCheck.cpp`)
 
@@ -46,5 +58,6 @@ The host sees 2,131 parameters. 49 are the rack's own; the rest are JUCE's stand
 - A Windows build with MSVC, and a macOS build. The code avoids compiler-specific features, but nothing has been compiled there yet.
 - Scanning, transport sync, automation and project recall in **Ableton Live** and **FL Studio**. Use [DAW_CHECKLIST.md](DAW_CHECKLIST.md).
 - A/B listening against the browser. No browser was available here to record a Web Audio reference, so the port is checked structurally (same graph, same constants, same automation curves), not sample by sample.
-- The editor on a real display: mouse interaction, file dialogs, HiDPI scaling.
+- The WEB RACK view in a real WebView2 / WKWebView plugin window: keyboard focus inside DAWs, WebView2 profile folder, and the event throughput of status updates.
+- Both views on a real display: mouse interaction, file dialogs, HiDPI scaling.
 - Steinberg's VST3 validator.

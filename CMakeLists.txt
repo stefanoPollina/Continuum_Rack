@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ContinuumRack VERSION 0.1.0 LANGUAGES C CXX)
+project(ContinuumRack VERSION 0.2.0 LANGUAGES C CXX)
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Build the Windows x64 target (-A x64).")
 endif()
@@ -105,6 +105,7 @@ juce_add_plugin(ContinuumRack
 juce_add_binary_data(RackResources SOURCES
     Resources/scenes.json.gz
     Resources/wavetables.bin.gz
+    Resources/engine-patches.json
     Resources/web/index.html.gz
     Resources/web/plugin-bridge.js)
 set_target_properties(RackResources PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -112,7 +113,7 @@ set_target_properties(RackResources PROPERTIES POSITION_INDEPENDENT_CODE ON)
 function(rack_configure target)
     target_sources(${target} PRIVATE
         Source/RackPatch.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
-        Source/WebBridge.cpp Source/WebRackView.cpp)
+        Source/WebBridge.cpp Source/WebRackView.cpp Source/NativeRack.cpp)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
     if(RACK_WEB_UI)
         target_compile_definitions(${target} PRIVATE JUCE_WEB_BROWSER=1)

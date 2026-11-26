@@ -4,142 +4,13 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-class RackLookAndFeel final : public juce::LookAndFeel_V4
-{
-public:
-    RackLookAndFeel();
-    void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float start, float end, juce::Slider&) override;
-    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
-    juce::Font getTextButtonFont (juce::TextButton&, int height) override;
-    void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-    juce::Font getComboBoxFont (juce::ComboBox&) override;
-    juce::Font getLabelFont (juce::Label&) override;
-};
-
 class NativeRackView;
 class WebRackView;
 
-// One labelled knob bound to a host parameter.
-struct RackKnob
-{
-    juce::Slider slider;
-    juce::Label label;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attach;
-    void init (juce::Component& owner, juce::AudioProcessorValueTreeState&, const juce::String& id, const juce::String& text, juce::Colour);
-    void place (juce::Rectangle<int>);
-};
-
-struct RackChoice
-{
-    juce::ComboBox box;
-    juce::Label label;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attach;
-    void init (juce::Component& owner, juce::AudioProcessorValueTreeState&, const juce::String& id, const juce::String& text);
-    void place (juce::Rectangle<int>);
-};
-
-class MeterBar final : public juce::Component
-{
-public:
-    void setLevel (float v);
-    void paint (juce::Graphics&) override;
-private:
-    float level = 0;
-};
-
-class SlotButton final : public juce::Component
-{
-public:
-    SlotButton (NativeRackView&, int bank, int slot);
-    void paint (juce::Graphics&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-    void setSlot (bool on, int type);
-    void flash();
-    void tick();
-private:
-    NativeRackView& editor;
-    int bank, slot;
-    bool on = false;
-    int type = 0;
-    float glow = 0;
-};
-
-class StepStrip final : public juce::Component
-{
-public:
-    explicit StepStrip (juce::Colour c) : colour (c) {}
-    void setPattern (const crack::Pattern&);
-    void setPlayhead (int step);
-    void paint (juce::Graphics&) override;
-private:
-    juce::Colour colour;
-    crack::Pattern pattern;
-    int playhead = -1;
-};
-
-class BankRow final : public juce::Component
-{
-public:
-    BankRow (NativeRackView&, int bank);
-    void resized() override;
-    void paint (juce::Graphics&) override;
-    void update (const crack::RackState&);
-    void tick();
-
-private:
-    friend class NativeRackView;
-class WebRackView;
-    NativeRackView& editor;
-    int bank;
-    juce::Colour colour;
-    RackKnob level, pan, cutoff;
-    juce::TextButton mute { "SEQ" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteAttach;
-    juce::Label insert;
-    MeterBar meter;
-    std::vector<std::unique_ptr<SlotButton>> slots;
-    StepStrip steps;
-    std::array<uint32_t, crack::numSlots> lastHits {};
-};
-
-// The compact native panel: every host parameter, scenes, slots and step view.
-class NativeRackView final : public juce::Component, private juce::Timer
-{
-public:
-    static constexpr int designWidth = 1200, designHeight = 760;
-    explicit NativeRackView (ContinuumRackProcessor&);
-    ~NativeRackView() override;
-    void paint (juce::Graphics&) override;
-    void resized() override;
-
-    ContinuumRackProcessor& rack;
-    void showSlotMenu (int bank, int slot, bool on, int type);
-
-private:
-    void timerCallback() override;
-    void refreshPatch();
-    void refreshSceneBox();
-    void panel (juce::Graphics&, juce::Rectangle<int>, const juce::String& title, juce::Colour) const;
-
-    RackLookAndFeel lnf;
-    juce::Label title, patchLabel, descLabel, clockStatus, voicesLabel;
-    juce::ComboBox sceneBox;
-    juce::TextButton prevScene { "<" }, nextScene { ">" }, importButton { "LOAD PATCH" }, exportButton { "SAVE PATCH" };
-    RackChoice seqMode, midiGate, midiTarget, lfoDest, lfoWave;
-    juce::TextButton runButton { "RUN" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> runAttach;
-    RackKnob tempo, root, master, drive, echoMix, echoTime, echoFb, lfoRate, lfoDepth, send;
-    MeterBar masterMeter;
-    std::vector<std::unique_ptr<BankRow>> rows;
-    std::unique_ptr<juce::FileChooser> chooser;
-    uint32_t shownSerial = 0;
-    juce::Rectangle<int> clockArea, masterArea, echoArea, lfoArea, routerArea, midiArea, banksArea;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NativeRackView)
-};
-
-// The plugin window: the web rack (the Continuum Rack page itself) or the native panel,
-// switched with the button in the bottom-right corner.
+// The plugin window. It shows the Continuum Rack in one of two ways, switched with the
+// button in the bottom-right corner (the choice is saved with the project):
+//   WEB RACK    - the Continuum Rack web page itself, in a WebView, driving the C++ engine
+//   NATIVE RACK - the same rack redrawn natively in JUCE
 class ContinuumRackEditor final : public juce::AudioProcessorEditor
 {
 public:
@@ -149,11 +20,18 @@ public:
     void paint (juce::Graphics&) override;
 
     bool hasWebView() const noexcept;
-    void showView (int view);   // 0 = web rack, 1 = native
+    void showView (int view);   // 0 = web rack, 1 = native rack
+    NativeRackView* getNativeView() noexcept { return native.get(); }
 
 private:
+    struct SwitchLook : juce::LookAndFeel_V4
+    {
+        void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
+        juce::Font getTextButtonFont (juce::TextButton&, int) override;
+    };
+
     ContinuumRackProcessor& rack;
-    RackLookAndFeel lnf;
+    SwitchLook look;
     std::unique_ptr<NativeRackView> native;
     std::unique_ptr<WebRackView> web;
     juce::TextButton switchButton;

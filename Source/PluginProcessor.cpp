@@ -125,6 +125,7 @@ ContinuumRackProcessor::ContinuumRackProcessor()
     scenes = crack::parseScenes (gunzip (BinaryData::scenes_json_gz, (size_t) BinaryData::scenes_json_gzSize), error);
     jassert (! scenes.empty());
 
+    enginePatches = crack::parseEnginePatches (juce::String::fromUTF8 (BinaryData::enginepatches_json, BinaryData::enginepatches_jsonSize));
     midiEvents.reserve (1024);
     setLatencySamples ((int) std::lround (0.006 * 48000.0));   // updated for the real rate in prepareToPlay
     if (! scenes.empty())
@@ -328,6 +329,14 @@ uint32_t ContinuumRackProcessor::applyEditorState (const crack::RackState& s, in
     }
     pushParamsFromState (s, previous);
     return patchSerial.load();
+}
+
+void ContinuumRackProcessor::editRack (const std::function<void (crack::RackState&)>& change)
+{
+    const std::lock_guard<std::mutex> g (programLock);
+    change (currentState);
+    crack::normalise (currentState);
+    publish (crack::buildProgram (currentState, library));
 }
 
 bool ContinuumRackProcessor::queueUiNote (const crack::UiNote& n)

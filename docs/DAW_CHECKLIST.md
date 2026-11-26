@@ -6,7 +6,15 @@ Work through this once on Windows after the first build. Tick each line or note 
 
 - [ ] Ableton: the plugin appears under Plug-Ins → VST3 → Continuum → Continuum Rack after a rescan
 - [ ] FL Studio: Manage plugins → Find installed plugins lists Continuum Rack as a **generator** (instrument)
-- [ ] It loads onto a MIDI track / Channel Rack slot without errors; the editor opens at 1200 × 760
+- [ ] It loads onto a MIDI track / Channel Rack slot without errors; the window opens at 1440 × 900 on the WEB RACK
+
+## Views
+
+- [ ] The plugin opens on the WEB RACK; it shows your rack with the current scene
+- [ ] Turn a knob on the page: the sound changes; automate a bank level in the DAW: the page's knob moves
+- [ ] Click NATIVE RACK: the same rack, same values; drag a cable from a bank OUT to a later IN; switch back: the cable is on the page too
+- [ ] Close and reopen the plugin window, and save/reopen the project: the chosen view comes back
+- [ ] Keys typed on the page (A W S E D …) play; note whether the DAW takes some keys first
 
 ## Transport sync
 
@@ -20,7 +28,7 @@ Work through this once on Windows after the first build. Tick each line or note 
 
 ## Scenes and presets
 
-- [ ] The scene menu and < > step through all 48 scenes; sound changes without stopping playback
+- [ ] The SCENES module and ◂ ▸ step through all 48 scenes; sound changes without stopping playback
 - [ ] Ableton's preset list / FL's preset menu show the same 48 names
 - [ ] After a scene change, level, pan, filter and master knobs move to the scene's values
 
@@ -36,8 +44,8 @@ Work through this once on Windows after the first build. Tick each line or note 
 - [ ] Automate Bank 1 Filter and Master Level: smooth, no zipper noise
 - [ ] Save the project, close, reopen: same scene, same knob values, same enabled slots
 - [ ] Duplicate the track: both copies recall identically
-- [ ] SAVE PATCH, then load that file in the web app (CORE ↑ LOAD): same rack
-- [ ] In the web app, change a patch and save (CORE ↓ SAVE); LOAD PATCH in the plugin: same rack
+- [ ] CORE ↓ SAVE in the plugin, then load that file in the web app (CORE ↑ LOAD): same rack
+- [ ] In the web app, change a patch and save (CORE ↓ SAVE); CORE ↑ LOAD in the plugin: same rack
 
 ## Sound against the browser
 

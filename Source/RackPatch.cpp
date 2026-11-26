@@ -281,6 +281,31 @@ juce::var stateToVar (const RackState& s)
     return juce::var (root);
 }
 
+void editFromVar (const juce::var& edit, EngineEdit& out)
+{
+    out = EngineEdit {};
+    readEdit (edit, out);
+}
+
+std::vector<EnginePatch> parseEnginePatches (const juce::String& json)
+{
+    std::vector<EnginePatch> out;
+    juce::var parsed;
+    if (juce::JSON::parse (json, parsed).failed()) return out;
+    if (const auto* arr = member (parsed, "patches").getArray())
+        for (const auto& pv : *arr)
+        {
+            EnginePatch p;
+            p.name = member (pv, "name").toString();
+            p.group = member (pv, "group").toString();
+            const float t = num (member (pv, "type"), 0);
+            p.type = juce::jlimit (0, 7, (int) t);
+            editFromVar (member (pv, "edit"), p.edit);
+            out.push_back (std::move (p));
+        }
+    return out;
+}
+
 bool readRackPatch (const juce::String& json, RackState& out, juce::String& error)
 {
     juce::var parsed;

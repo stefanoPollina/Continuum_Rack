@@ -1,8 +1,19 @@
-# Continuum Rack · DAW plugin · 0.1.0
+# Continuum Rack · DAW plugin · 0.2.0
 
 The [Continuum Rack web synth](https://stefanopollina.github.io/Hybrid/) (repo `stefanoPollina/Hybrid`) rebuilt as a C++/JUCE instrument plugin for Ableton Live, FL Studio and other VST3 hosts. It has 8 banks × 8 engines, a 64-step sequencer per bank that follows the host's transport, bank send cables, a global LFO, a master echo and a compressor, and all 48 factory scenes.
 
 **Status: source build.** Start with [START_HERE.md](START_HERE.md). This repo holds source code, not a compiled Windows plugin. The engine and plugin have been compiled and tested on Linux. A Windows build and real-DAW checks are still to do (see [docs/VALIDATION.md](docs/VALIDATION.md)).
+
+## Two ways to see the rack
+
+The plugin window shows the rack one of two ways. To switch, use the orange button in the bottom-right corner; the project remembers which one you used.
+
+| View | What it is |
+|---|---|
+| **WEB RACK** | The Continuum Rack page itself (`Hybrid/index.html`) running in the plugin's WebView: Edge WebView2 on Windows, WKWebView on macOS. Every module works as it does in the browser, including the DSP editor, cables, SCENES, ENGINE ATLAS, FACTORY and MUTATOR. A small bridge script replaces the page's Web Audio engine. Every edit goes to the plugin's C++ engine, which makes the sound in the DAW. Scopes, meters, engine LEDs and the SEQ playhead are fed back from the plugin, and host automation moves the page's knobs. |
+| **NATIVE RACK** | The same rack redrawn in JUCE, with no WebView: the same 1740 × 2660 layout, module skins, knob colours and patch cables. It has CORE, MIDI IN, MASTER, DELAY, LFO, SCOPE, OCTOSCOPE, ROUTER, SCENES, SEQ 8×64, DSP EDITOR, the 8 bank strips, all 64 engine modules, KEYS and ENGINE ATLAS. FACTORY and MUTATOR are only in the web view. Ctrl/Cmd + wheel zooms, and the rack opens fitted to the window width. |
+
+![Native rack](docs/native-rack.png)
 
 ## What carries over from the web app
 
@@ -13,11 +24,11 @@ The [Continuum Rack web synth](https://stefanopollina.github.io/Hybrid/) (repo `
 | Bank strip: filter, insert (BYPASS / SATUR / DARK / HPF / TREM), level, pan | Same chain and curves; level, pan and filter are host parameters |
 | Cables: bank OUT → later bank IN sends (max 12), LFO → bank MOD | Same routing rules, including the web app's normalise() |
 | SEQ 8 × 64 with arp (up/down/up-down/random), step pitch, velocity, gate up to 3200 %, step filter | Same; clocked by the host's song position |
-| CORE save/load (`continuum-synth-p01`) | **LOAD PATCH / SAVE PATCH** read and write the same files |
-| 48 scenes | The plugin's preset (program) list, and the scene menu |
+| CORE save/load (`continuum-synth-p01`) | The plugin's CORE **↓ SAVE / ↑ LOAD** (in both views) read and write the same files |
+| 48 scenes | The plugin's preset (program) list, and the SCENES module |
 | Keyboard / Web MIDI | MIDI from the host track, gated or one-shot |
 
-Patches move both ways. Save a rack in the browser (CORE ↓ SAVE), then use **LOAD PATCH** in the plugin. **SAVE PATCH** writes a file the browser's CORE ↑ LOAD accepts.
+Patches move both ways. Save a rack in the browser (CORE ↓ SAVE), then use CORE ↑ LOAD in the plugin, and the other way round.
 
 ## Controls in the plugin
 
@@ -30,9 +41,12 @@ Patches move both ways. Save a rack in the browser (CORE ↓ SAVE), then use **L
 | Router | Send Level (0–40 %) |
 | MIDI | Notes: *Gated* (held until note-off, sustain pedal works) or *One-shot (web)*, which plays 0.42 s notes like the browser · Target: all banks or one bank |
 | Each bank | Level · Pan · Filter · Seq Mute |
+| Window | Which view is open (web or native) is saved with the project |
 | Output | Clip at 0 dBFS (on by default, as a browser does at the sound card) |
 
-To switch an engine slot on or off, click it. Right-click a slot to change its engine type. To edit voices, steps or cables in detail, use the web app, then load the patch here. Those editors are not in the plugin yet.
+Everything else in the rack (engine types and voice parameters, steps, arp, engine targets, inserts, cables) is edited in either view, and it is saved with the project.
+
+In both views, **RUN SEQ** starts the internal clock when the DAW is stopped. Pressing play in the DAW hands the clock to the host's transport.
 
 ### Clock behaviour
 
@@ -60,18 +74,21 @@ The DSP is a port, not a recording of Chrome's output, and a few things differ:
 | `Source/RackEngine.*` | The audio engine (no JUCE): voices, bank strips, sends, LFO, echo, compressor, sequencer |
 | `Source/RackPatch.*` | JSON ↔ rack state, `continuum-synth-p01` files, factory scenes |
 | `Source/PluginProcessor.*` | Parameters, host transport, MIDI, programs, state, patch hand-over to the audio thread |
-| `Source/PluginEditor.*` | Native rack-style editor |
+| `Source/PluginEditor.*` | The plugin window and its WEB RACK / NATIVE RACK switch |
+| `Source/WebRackView.*`, `Source/WebBridge.*` | The page in a WebView, and the message bridge to the processor |
+| `Source/NativeRack.*` | The native redraw of the rack |
+| `Resources/web/` | The page (compressed) and `plugin-bridge.js`, injected before `</body>` |
 | `Resources/` | Scenes and wavetables extracted from the web app; see `resource-metadata.json` |
 | `scripts/extract-rack-data.cjs` | Regenerates `Resources/` from `Hybrid/index.html` |
-| `Tests/` | DSP tests, processor tests, a VST3 host-load check, the web app's example patch |
+| `Tests/` | DSP tests, processor tests, a VST3 host-load check, the page bridge test (`Tests/web/bridge_test.py`, headless Chrome), the web app's example patch |
 
 ## Building
 
 The build uses JUCE 8.0.12, pinned to the same commit as the Mosaic Matrix FX build, and CMake 3.24+.
 
-- **Windows:** double-click `Build-Windows.cmd`. See [START_HERE.md](START_HERE.md).
+- **Windows:** double-click `Build-Windows.cmd`. The script also downloads the WebView2 SDK package from nuget.org; pass `-NoWebUI` to build without the web view. See [START_HERE.md](START_HERE.md).
 - **macOS:** `cmake -S . -B build -G Xcode && cmake --build build --config Release` builds VST3, AU and the standalone app.
-- **Linux:** `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build` needs the usual JUCE packages (X11, Xrandr, Xinerama, Xcursor, freetype, ALSA).
+- **Linux:** `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build` needs the usual JUCE packages (X11, Xrandr, Xinerama, Xcursor, freetype, ALSA), plus WebKitGTK 4.1 for the web view. Add `-DRACK_WEB_UI=OFF` to leave out the web view.
 - **DSP only, no JUCE:** `scripts/test-core.sh`.
 
 To refresh the factory data after the web app changes:

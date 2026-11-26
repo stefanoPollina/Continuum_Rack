@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "WebBridge.h"
+#include "NativeRack.h"
 
 #include <juce_events/juce_events.h>
 
@@ -367,6 +368,65 @@ void testWebBridge()
     check (crack::writeRackPatch (p.getRackState()) == before, "malformed page messages leave the rack unchanged");
 }
 
+void testNativeRack()
+{
+    ContinuumRackProcessor p;
+    p.prepareToPlay (48000, 512);
+    NativeRackCanvas rackView (p);
+    check (rackView.numModules() == 87, "native rack has the web rack's 87 modules (got " + juce::String (rackView.numModules()) + ")");
+    check (rackView.numControls() > 600, "native rack controls laid out (" + juce::String (rackView.numControls()) + ")");
+
+    // engine ON toggles a slot (bank 2, engine 2 starts off in Squelch Dub? toggle and compare)
+    const bool before = p.getRackState().banks[1].slots[1].on;
+    check (rackView.clickControl ("on9"), "engine ON button found");
+    check (p.getRackState().banks[1].slots[1].on != before, "engine ON switches the slot in the plugin");
+    // insert selector
+    const auto ins = p.getRackState().banks[0].insert;
+    rackView.clickControl ("ins0");
+    check (p.getRackState().banks[0].insert != ins, "bank insert selector cycles");
+    // host parameter knob
+    const float lvl = getParam (p, ContinuumRackProcessor::bankParamID (3, "level"));
+    rackView.dragKnob (ContinuumRackProcessor::bankParamID (3, "level"), lvl > 50 ? -0.1f : 0.1f);
+    check (std::abs (getParam (p, ContinuumRackProcessor::bankParamID (3, "level")) - lvl) > 5, "bank LEVEL knob moves the host parameter");
+    // engine knob edits the rack
+    const float cut = p.getRackState().banks[0].slots[0].edit.cutoff;
+    rackView.dragKnob ("e:0:0:CUTOFF", -0.2f);
+    check (p.getRackState().banks[0].slots[0].edit.cutoff < cut - 10, "engine CUTOFF knob edits the voice");
+    // DSP editor follows EDIT
+    rackView.clickControl ("edit21");
+    rackView.dragKnob ("e:2:5:DETUNE", 0.25f);
+    check (p.getRackState().banks[2].slots[5].edit.detune > 20, "EDIT focuses the DSP editor on that engine");
+    // sequencer step
+    const bool st = p.getRackState().patterns[2].steps[5].on;
+    check (rackView.tapStep (2, 5) && p.getRackState().patterns[2].steps[5].on != st, "clicking a SEQ cell toggles the step");
+    check (! rackView.tapStep (2, 60), "cells past the pattern length are inert");
+    // cables
+    check (rackView.connect ("bo:4", "bi:6"), "OUT to a later IN makes a send");
+    bool found = false;
+    for (auto& c : p.getRackState().cables) found |= c.from == "bo:4" && c.to == "bi:6";
+    check (found, "the send is in the rack");
+    check (! rackView.connect ("bo:6", "bi:2"), "a backward send is refused");
+    check (rackView.connect ("lfo", "bm:7"), "LFO OUT to a MOD input");
+    // engine atlas
+    rackView.clickControl ("libLoad");
+    const auto& atlas = p.getEnginePatches();
+    check (atlas.size() == 76 && p.getRackState().banks[2].slots[5].type == atlas[0].type && p.getRackState().banks[2].slots[5].on,
+           "ENGINE ATLAS loads a patch into the focused engine");
+    // scenes and panic
+    rackView.clickControl ("scnNext");
+    check (p.getSceneIndex() == 1, "SCENES next loads Acid House");
+    rackView.clickControl ("trig0");
+    juce::AudioBuffer<float> buf (2, 512);
+    juce::MidiBuffer midi;
+    p.processBlock (buf, midi);
+    check (p.getEngine().countActiveVoices() > 0, "TRIG auditions an engine");
+    rackView.clickControl ("stop");
+    p.processBlock (buf, midi);
+    check (p.getEngine().countActiveVoices() == 0, "STOP (panic) silences the engine");
+    rackView.clickControl ("run");
+    check (getParam (p, "run") > 0.5f, "RUN SEQ sets Run");
+}
+
 void testEditor()
 {
     ContinuumRackProcessor p;
@@ -396,6 +456,19 @@ void testEditor()
         juce::FileOutputStream os (out);
         juce::PNGImageFormat().writeImageToStream (img, os);
         std::cout << "editor snapshot written to " << shot << "\n";
+        if (auto* shell = dynamic_cast<ContinuumRackEditor*> (ed.get()))
+            if (auto* nv = shell->getNativeView())
+            {
+                auto& canvas = nv->getCanvas();
+                for (int part = 0; part < 4; ++part)
+                {
+                    auto im = canvas.createComponentSnapshot ({ 0, part * 665, NativeRackCanvas::rackWidth, 665 }, true, 1.0f);
+                    juce::File f (juce::String (shot) + ".rack" + juce::String (part) + ".png");
+                    f.deleteFile();
+                    juce::FileOutputStream fo (f);
+                    juce::PNGImageFormat().writeImageToStream (im, fo);
+                }
+            }
     }
     p.setCurrentProgram (5);
     ed.reset();
@@ -412,6 +485,7 @@ int main()
         testWebPatches();
         testTransportAndMidi();
         testWebBridge();
+        testNativeRack();
         testEditor();
     }
     catch (const std::exception& e)

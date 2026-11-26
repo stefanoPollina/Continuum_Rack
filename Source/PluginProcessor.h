@@ -6,6 +6,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -65,6 +66,12 @@ public:
     void requestPanic() noexcept { panicFlag.store (true); }
     void setScopeBank (int b) noexcept { engine.scopeBank.store (b); }
 
+    // ── for the native rack view ─────────────────────────────────────────────────
+    // Edits the rack (not the host parameters) and publishes it to the audio thread.
+    void editRack (const std::function<void (crack::RackState&)>& change);
+    const std::vector<crack::EnginePatch>& getEnginePatches() const noexcept { return enginePatches; }
+    const std::vector<crack::MosaicTableInfo>& getWaveTableInfos() const noexcept { return library.mosaicTables(); }
+
     // Which editor view is showing (0 = web rack, 1 = native); saved with the project.
     std::atomic<int> editorView { 0 };
 
@@ -81,6 +88,7 @@ private:
 
     crack::WaveLibrary library;
     std::vector<crack::Scene> scenes;
+    std::vector<crack::EnginePatch> enginePatches;
     crack::RackEngine engine;
 
     // Program hand-over: the audio thread reads `live` at each block start.

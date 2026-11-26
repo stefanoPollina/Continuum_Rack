@@ -13,6 +13,17 @@ constexpr const char* rackPatchFormat = "continuum-synth-p01";
 // Missing fields take the web app's defaults; the result is normalised.
 bool stateFromVar (const juce::var& state, RackState& out, juce::String& error);
 juce::var stateToVar (const RackState&);
+// Reads an engine "edit" object over the web app's defaults (freshEdit()).
+void editFromVar (const juce::var& edit, EngineEdit& out);
+
+// The ENGINE ATLAS patches (Resources/engine-patches.json).
+struct EnginePatch
+{
+    juce::String name, group;
+    int type = 0;
+    EngineEdit edit;
+};
+std::vector<EnginePatch> parseEnginePatches (const juce::String& json);
 
 // Whole patch files: {"format":"continuum-synth-p01","state":{...}}
 bool readRackPatch (const juce::String& json, RackState& out, juce::String& error);
