@@ -81,6 +81,50 @@ struct MidiEvent
     float velocity;                 // 0..1
 };
 
+// Lock-free-ish rings the editor reads for its scopes (relaxed atomics; a torn frame only
+// shows as a glitch in a drawing).
+struct ScopeTaps
+{
+    static constexpr int size = 2048;
+    std::array<std::atomic<float>, size> master {};
+    std::array<std::array<std::atomic<float>, size>, numSlots> slot {};
+    std::atomic<int> masterW { 0 }, slotW { 0 };
+
+    void writeMaster (const float* l, const float* r, int n) noexcept
+    {
+        int w = masterW.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i) { master[(size_t) w].store (0.5f * (l[i] + r[i]), std::memory_order_relaxed); w = (w + 1) % size; }
+        masterW.store (w, std::memory_order_release);
+    }
+    void writeSlot (int s, const float* x, int n) noexcept
+    {
+        int w = slotW.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i) slot[(size_t) s][(size_t) ((w + i) % size)].store (x[i], std::memory_order_relaxed);
+        if (s == numSlots - 1) slotW.store ((w + n) % size, std::memory_order_release);
+    }
+    // Copies the newest `count` samples (oldest first).
+    void readMaster (float* dst, int count) const noexcept
+    {
+        const int w = masterW.load (std::memory_order_acquire);
+        for (int i = 0; i < count; ++i) dst[i] = master[(size_t) ((w - count + i + size) % size)].load (std::memory_order_relaxed);
+    }
+    void readSlot (int s, float* dst, int count) const noexcept
+    {
+        const int w = slotW.load (std::memory_order_acquire);
+        for (int i = 0; i < count; ++i) dst[i] = slot[(size_t) s][(size_t) ((w - count + i + size) % size)].load (std::memory_order_relaxed);
+    }
+};
+
+// A note started from the editor rather than from MIDI or the sequencer.
+struct UiNote
+{
+    int midi = 48;
+    double duration = 0.42;
+    int bank = -1, slot = -1;   // -1: every enabled engine / every engine of the bank
+    float velocity = 1.0f;
+    bool force = false;         // play this exact slot even if it is switched off (factory drone)
+};
+
 class RackEngine
 {
 public:
@@ -106,7 +150,19 @@ public:
     std::array<std::array<std::atomic<uint32_t>, numSlots>, numBanks> slotHits {};
     std::array<std::atomic<int>, numBanks> playStep {};   // -1 when idle
     std::atomic<int> activeVoices { 0 };
-    std::atomic<bool> usingHostClock { false };
+    std::atomic<bool> usingHostClock { false };   // host supplies a usable position
+    std::atomic<bool> seqRunning { false };
+    std::atomic<int64_t> lastTick { 0 };
+    std::atomic<int> scopeBank { 0 };
+    std::atomic<int> lastMidiNote { -1 };
+    std::atomic<uint32_t> midiNoteCount { 0 };            // bank whose slots feed the scope taps
+    ScopeTaps scopes;
+
+    // Call on the audio thread, before process(): queued notes start at the block's first sample.
+    bool queueUiNote (const UiNote&) noexcept;
+    void stopUiNotes() noexcept;
+    void panic() noexcept;
+    static constexpr int uiNoteId = 1000;
 
     int countActiveVoices() const noexcept;
     // The master compressor's 6 ms look-ahead (Chromium's DynamicsCompressor pre-delay).
@@ -121,6 +177,10 @@ private:
     void releaseNote (int note, int offset) noexcept;
     void runStep (int64_t tick, int offset, double bpm, const LiveParams&) noexcept;
     void midiNote (int note, float velocity, int offset, const EngineOptions&) noexcept;
+    void triggerLikeWeb (int midi, double duration, int onlyBank, int onlySlot, float velocity) noexcept;
+    std::array<UiNote, 64> uiNotes {};
+    int numUiNotes = 0;
+    std::array<std::vector<float>, numSlots> slotScratch;
 
     const Program* program = nullptr;
     double sr = 48000;

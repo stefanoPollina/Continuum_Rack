@@ -162,6 +162,14 @@ void ContinuumRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const int n = buffer.getNumSamples();
     auto* prog = live.load (std::memory_order_acquire);
     engine.setProgram (prog);
+    if (panicFlag.exchange (false)) engine.panic();
+    if (stopUiNotesFlag.exchange (false)) engine.stopUiNotes();
+    if (prog != nullptr)
+    {
+        const auto scope = uiFifo.read (uiFifo.getNumReady());
+        for (int i = 0; i < scope.blockSize1; ++i) engine.queueUiNote (uiFifoData[(size_t) (scope.startIndex1 + i)]);
+        for (int i = 0; i < scope.blockSize2; ++i) engine.queueUiNote (uiFifoData[(size_t) (scope.startIndex2 + i)]);
+    }
 
     crack::LiveParams lp;
     lp.master = p->master->load(); lp.drive = p->drive->load(); lp.delayMix = p->delayMix->load();
@@ -274,23 +282,61 @@ void ContinuumRackProcessor::loadState (const crack::RackState& s, const juce::S
     if (updateParams) pushParamsFromState (currentState);
 }
 
-void ContinuumRackProcessor::pushParamsFromState (const crack::RackState& s)
+void ContinuumRackProcessor::pushParamsFromState (const crack::RackState& s, const crack::RackState* prev)
 {
-    auto set = [this] (const juce::String& id, float v) {
+    crack::RackState none;
+    const auto& old = prev != nullptr ? *prev : none;
+    const bool all = prev == nullptr;
+    auto setIf = [this, all] (const juce::String& id, float v, float before) {
+        if (! all && juce::exactlyEqual (v, before)) return;
         if (auto* prm = parameters.getParameter (id))
             prm->setValueNotifyingHost (prm->convertTo0to1 (v));
     };
-    set ("master", s.master); set ("drive", s.drive); set ("delayMix", s.delayMix);
-    set ("delayTime", s.delayTime); set ("feedback", s.feedback); set ("lfoRate", s.lfoRate);
-    set ("lfoDepth", s.lfoDepth); set ("lfoDest", (float) (int) s.lfoDest); set ("lfoWave", (float) lfoWaveIndex (s.lfoWave));
-    set ("sendLevel", s.sendLevel); set ("root", s.root); set ("tempo", s.tempo);
+#define CR_SET(id, field) setIf (id, (float) (s.field), (float) (old.field))
+    CR_SET ("master", master); CR_SET ("drive", drive); CR_SET ("delayMix", delayMix);
+    CR_SET ("delayTime", delayTime); CR_SET ("feedback", feedback); CR_SET ("lfoRate", lfoRate);
+    CR_SET ("lfoDepth", lfoDepth); CR_SET ("sendLevel", sendLevel); CR_SET ("root", root); CR_SET ("tempo", tempo);
+    setIf ("lfoDest", (float) (int) s.lfoDest, (float) (int) old.lfoDest);
+    setIf ("lfoWave", (float) lfoWaveIndex (s.lfoWave), (float) lfoWaveIndex (old.lfoWave));
     for (int b = 0; b < crack::numBanks; ++b)
     {
-        set (bankParamID (b, "level"), s.banks[(size_t) b].level);
-        set (bankParamID (b, "pan"), s.banks[(size_t) b].pan);
-        set (bankParamID (b, "cutoff"), s.banks[(size_t) b].cutoff);
-        set (bankParamID (b, "mute"), s.patterns[(size_t) b].mute ? 1.0f : 0.0f);
+        const auto i = (size_t) b;
+        setIf (bankParamID (b, "level"), s.banks[i].level, old.banks[i].level);
+        setIf (bankParamID (b, "pan"), s.banks[i].pan, old.banks[i].pan);
+        setIf (bankParamID (b, "cutoff"), s.banks[i].cutoff, old.banks[i].cutoff);
+        setIf (bankParamID (b, "mute"), s.patterns[i].mute ? 1.0f : 0.0f, old.patterns[i].mute ? 1.0f : 0.0f);
     }
+#undef CR_SET
+}
+
+uint32_t ContinuumRackProcessor::applyEditorState (const crack::RackState& s, int sceneIndex, const crack::RackState* previous)
+{
+    juce::String name = "Edited rack", desc;
+    if (sceneIndex >= 0 && sceneIndex < (int) scenes.size())
+    {
+        name = scenes[(size_t) sceneIndex].name;
+        desc = scenes[(size_t) sceneIndex].desc;
+    }
+    {
+        const std::lock_guard<std::mutex> g (programLock);
+        currentState = s;
+        crack::normalise (currentState);
+        patchName = name;
+        patchDesc = desc;
+        currentScene.store (sceneIndex);
+        publish (crack::buildProgram (currentState, library));
+    }
+    pushParamsFromState (s, previous);
+    return patchSerial.load();
+}
+
+bool ContinuumRackProcessor::queueUiNote (const crack::UiNote& n)
+{
+    const auto scope = uiFifo.write (1);
+    if (scope.blockSize1 > 0) uiFifoData[(size_t) scope.startIndex1] = n;
+    else if (scope.blockSize2 > 0) uiFifoData[(size_t) scope.startIndex2] = n;
+    else return false;
+    return true;
 }
 
 void ContinuumRackProcessor::foldParams (crack::RackState& s) const
@@ -390,6 +436,7 @@ void ContinuumRackProcessor::getStateInformation (juce::MemoryBlock& dest)
     root.setProperty ("name", getPatchName(), nullptr);
     root.setProperty ("desc", getPatchDescription(), nullptr);
     root.setProperty ("rack", crack::writeRackPatch (getRackState()), nullptr);
+    root.setProperty ("view", editorView.load(), nullptr);
     root.appendChild (parameters.copyState(), nullptr);
     juce::MemoryOutputStream out (dest, false);
     root.writeToStream (out);
@@ -408,6 +455,7 @@ void ContinuumRackProcessor::setStateInformation (const void* data, int size)
     const auto params = root.getChildWithName (parameters.state.getType());
     if (! params.isValid()) return;
 
+    editorView.store (juce::jlimit (0, 1, (int) root.getProperty ("view", 0)));
     loadState (s, root.getProperty ("name").toString(), root.getProperty ("desc").toString(),
                (int) root.getProperty ("scene", -1), false);
     parameters.replaceState (params);

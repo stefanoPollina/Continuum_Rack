@@ -54,6 +54,19 @@ public:
     uint32_t getPatchSerial() const noexcept { return patchSerial.load(); }
     const crack::RackEngine& getEngine() const noexcept { return engine; }
     int getSceneIndex() const noexcept { return currentScene.load(); }   // -1 for an imported patch
+    double getPreparedSampleRate() const noexcept { return preparedRate; }
+
+    // ── for the web rack view ────────────────────────────────────────────────────
+    // Applies a rack edited in the page. Parameters are set only where they differ from
+    // `previous` (all of them when null). Returns the new patch serial.
+    uint32_t applyEditorState (const crack::RackState&, int sceneIndex, const crack::RackState* previous);
+    bool queueUiNote (const crack::UiNote&);
+    void requestStopUiNotes() noexcept { stopUiNotesFlag.store (true); }
+    void requestPanic() noexcept { panicFlag.store (true); }
+    void setScopeBank (int b) noexcept { engine.scopeBank.store (b); }
+
+    // Which editor view is showing (0 = web rack, 1 = native); saved with the project.
+    std::atomic<int> editorView { 0 };
 
     juce::AudioProcessorValueTreeState parameters;
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -64,7 +77,7 @@ private:
     void loadState (const crack::RackState&, const juce::String& name, const juce::String& desc, int sceneIndex, bool updateParams);
     void publish (std::unique_ptr<crack::Program>);
     void foldParams (crack::RackState&) const;
-    void pushParamsFromState (const crack::RackState&);
+    void pushParamsFromState (const crack::RackState&, const crack::RackState* previous = nullptr);
 
     crack::WaveLibrary library;
     std::vector<crack::Scene> scenes;
@@ -83,6 +96,9 @@ private:
     std::atomic<uint32_t> patchSerial { 0 };
 
     std::vector<crack::MidiEvent> midiEvents;
+    juce::AbstractFifo uiFifo { 256 };
+    std::array<crack::UiNote, 256> uiFifoData {};
+    std::atomic<bool> stopUiNotesFlag { false }, panicFlag { false };
     std::vector<float> monoScratch;
     int preparedBlock = 512;
     double preparedRate = 48000;

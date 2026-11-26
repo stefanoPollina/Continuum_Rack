@@ -10,6 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(RACK_BUILD_PLUGIN "Build the JUCE plugin and processor integration tests" ON)
 option(RACK_BUILD_STANDALONE "Also build the standalone app" ON)
 set(RACK_JUCE_PATH "" CACHE PATH "Optional local JUCE 8.0.12 source directory")
+# The web rack view needs a WebView: WebView2 on Windows (the build script fetches its SDK
+# package), WKWebView on macOS, WebKitGTK 4.1 dev packages on Linux.
+option(RACK_WEB_UI "Include the web rack view (the Continuum Rack page in a WebView)" ON)
+set(RACK_WEBVIEW2_PACKAGE_DIR "" CACHE PATH "Folder holding the Microsoft.Web.WebView2 NuGet package (Windows)")
 
 include(CTest)
 
@@ -60,6 +64,18 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+if(WIN32 AND RACK_WEB_UI AND RACK_WEBVIEW2_PACKAGE_DIR)
+    set(JUCE_WEBVIEW2_PACKAGE_LOCATION "${RACK_WEBVIEW2_PACKAGE_DIR}" CACHE PATH "" FORCE)
+endif()
+set(RACK_WEB_ARGS)
+if(RACK_WEB_UI)
+    if(WIN32)
+        set(RACK_WEB_ARGS NEEDS_WEBVIEW2 TRUE)
+    elseif(UNIX AND NOT APPLE)
+        set(RACK_WEB_ARGS NEEDS_WEB_BROWSER TRUE)
+    endif()
+endif()
+
 set(RACK_FORMATS VST3)
 if(APPLE)
     list(APPEND RACK_FORMATS AU)
@@ -83,19 +99,32 @@ juce_add_plugin(ContinuumRack
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES Instrument Synth
-    AU_MAIN_TYPE kAudioUnitType_MusicDevice)
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice
+    ${RACK_WEB_ARGS})
 
 juce_add_binary_data(RackResources SOURCES
     Resources/scenes.json.gz
-    Resources/wavetables.bin.gz)
+    Resources/wavetables.bin.gz
+    Resources/web/index.html.gz
+    Resources/web/plugin-bridge.js)
 set_target_properties(RackResources PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 function(rack_configure target)
     target_sources(${target} PRIVATE
-        Source/RackPatch.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
+        Source/RackPatch.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
+        Source/WebBridge.cpp Source/WebRackView.cpp)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+    if(RACK_WEB_UI)
+        target_compile_definitions(${target} PRIVATE JUCE_WEB_BROWSER=1)
+        if(WIN32)
+            target_compile_definitions(${target} PRIVATE JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1)
+        endif()
+    else()
+        target_compile_definitions(${target} PRIVATE JUCE_WEB_BROWSER=0)
+    endif()
+    target_link_libraries(${target} PRIVATE juce::juce_gui_extra)
     target_compile_definitions(${target} PRIVATE
-        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+        JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0)
     target_link_libraries(${target} PRIVATE
@@ -114,7 +143,7 @@ endfunction()
 rack_configure(ContinuumRack)
 
 if(BUILD_TESTING)
-    juce_add_console_app(RackProcessorTests PRODUCT_NAME "Continuum Rack Processor Tests")
+    juce_add_console_app(RackProcessorTests PRODUCT_NAME "Continuum Rack Processor Tests" ${RACK_WEB_ARGS})
     rack_configure(RackProcessorTests)
     target_sources(RackProcessorTests PRIVATE Tests/ProcessorTests.cpp)
     target_compile_definitions(RackProcessorTests PRIVATE JucePlugin_Name="Continuum Rack"

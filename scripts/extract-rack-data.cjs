@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* Extracts the factory scenes and Mosaic wavetables from the Continuum Rack web app
-   (stefanoPollina/Hybrid index.html) into the plugin's Resources folder.
+   (stefanoPollina/Hybrid index.html) into the plugin's Resources folder, along with a
+   compressed copy of the page itself for the plugin's web rack view.
 
    usage: node scripts/extract-rack-data.cjs path/to/Hybrid/index.html [outDir]
 
@@ -82,6 +83,10 @@ fs.writeFileSync(path.join(outDir, 'scenes.json.gz'), zlib.gzipSync(Buffer.from(
 
 const enginePatches = FACT_ENG.map(p => ({ name: p.name, group: p.group, type: p.type, edit: p.edit }));
 fs.writeFileSync(path.join(outDir, 'engine-patches.json'), JSON.stringify({ format: 'continuum-rack-engine-patches-1', patches: enginePatches }, null, 1));
+
+// The page itself, for the plugin's web rack view (the bridge script is added at run time).
+fs.mkdirSync(path.join(outDir, 'web'), { recursive: true });
+fs.writeFileSync(path.join(outDir, 'web', 'index.html.gz'), zlib.gzipSync(Buffer.from(html, 'utf8'), { level: 9 }));
 
 const meta = { source: 'stefanoPollina/Hybrid index.html', sha256: sha, scenes: scenes.length, tables: bankJson.tables.length,
   framesPerTable: 17, harmonics: H, tablesUsedByScenes: [...usedTables].sort(), enginePatches: enginePatches.length,

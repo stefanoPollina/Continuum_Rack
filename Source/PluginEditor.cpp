@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "WebRackView.h"
 
 namespace
 {
@@ -156,7 +157,7 @@ void MeterBar::paint (juce::Graphics& g)
     }
 }
 
-SlotButton::SlotButton (ContinuumRackEditor& e, int b, int s) : editor (e), bank (b), slot (s) {}
+SlotButton::SlotButton (NativeRackView& e, int b, int s) : editor (e), bank (b), slot (s) {}
 
 void SlotButton::setSlot (bool isOn, int t)
 {
@@ -232,7 +233,7 @@ void StepStrip::paint (juce::Graphics& g)
     }
 }
 
-BankRow::BankRow (ContinuumRackEditor& e, int b) : editor (e), bank (b), colour (bankColour (b)), steps (bankColour (b))
+BankRow::BankRow (NativeRackView& e, int b) : editor (e), bank (b), colour (bankColour (b)), steps (bankColour (b))
 {
     auto& st = e.rack.parameters;
     level.init (*this, st, ContinuumRackProcessor::bankParamID (b, "level"), "LEVEL", colour);
@@ -314,7 +315,7 @@ void BankRow::tick()
 }
 
 // ───────────────────────────────────────────────────────────── editor
-ContinuumRackEditor::ContinuumRackEditor (ContinuumRackProcessor& p) : AudioProcessorEditor (p), rack (p)
+NativeRackView::NativeRackView (ContinuumRackProcessor& p) : rack (p)
 {
     setLookAndFeel (&lnf);
     auto& st = p.parameters;
@@ -413,20 +414,20 @@ ContinuumRackEditor::ContinuumRackEditor (ContinuumRackProcessor& p) : AudioProc
     startTimerHz (30);
 }
 
-ContinuumRackEditor::~ContinuumRackEditor()
+NativeRackView::~NativeRackView()
 {
     stopTimer();
     setLookAndFeel (nullptr);
 }
 
-void ContinuumRackEditor::refreshSceneBox()
+void NativeRackView::refreshSceneBox()
 {
     sceneBox.clear (juce::dontSendNotification);
     int id = 1;
     for (const auto& s : rack.getScenes()) sceneBox.addItem (s.name, id++);
 }
 
-void ContinuumRackEditor::refreshPatch()
+void NativeRackView::refreshPatch()
 {
     shownSerial = rack.getPatchSerial();
     const auto s = rack.getRackState();
@@ -440,7 +441,7 @@ void ContinuumRackEditor::refreshPatch()
     for (auto& r : rows) r->update (s);
 }
 
-void ContinuumRackEditor::timerCallback()
+void NativeRackView::timerCallback()
 {
     if (rack.getPatchSerial() != shownSerial) refreshPatch();
     const auto& eng = rack.getEngine();
@@ -453,7 +454,7 @@ void ContinuumRackEditor::timerCallback()
     voicesLabel.setText (juce::String (eng.activeVoices.load()) + " / " + juce::String (crack::RackEngine::maxVoices) + " voices", juce::dontSendNotification);
 }
 
-void ContinuumRackEditor::showSlotMenu (int bank, int slot, bool on, int type)
+void NativeRackView::showSlotMenu (int bank, int slot, bool on, int type)
 {
     juce::PopupMenu m;
     m.addSectionHeader ("Bank " + juce::String (bank + 1) + utf8 (" · Engine ") + juce::String (slot + 1));
@@ -467,7 +468,7 @@ void ContinuumRackEditor::showSlotMenu (int bank, int slot, bool on, int type)
                      });
 }
 
-void ContinuumRackEditor::panel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t, juce::Colour c) const
+void NativeRackView::panel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t, juce::Colour c) const
 {
     auto f = r.toFloat().reduced (2);
     g.setColour (panelC);
@@ -484,7 +485,7 @@ void ContinuumRackEditor::panel (juce::Graphics& g, juce::Rectangle<int> r, cons
     }
 }
 
-void ContinuumRackEditor::paint (juce::Graphics& g)
+void NativeRackView::paint (juce::Graphics& g)
 {
     g.fillAll (bg);
     g.setColour (rail);
@@ -503,7 +504,7 @@ void ContinuumRackEditor::paint (juce::Graphics& g)
                 getLocalBounds().removeFromBottom (20).reduced (12, 0), juce::Justification::centredLeft);
 }
 
-void ContinuumRackEditor::resized()
+void NativeRackView::resized()
 {
     auto r = getLocalBounds();
     auto top = r.removeFromTop (58).reduced (12, 8);
@@ -580,4 +581,57 @@ void ContinuumRackEditor::resized()
     auto banks = r.reduced (8, 0);
     const int rowH = banks.getHeight() / crack::numBanks;
     for (auto& row : rows) row->setBounds (banks.removeFromTop (rowH));
+}
+
+// ───────────────────────────────────────────────────────────── plugin window
+ContinuumRackEditor::ContinuumRackEditor (ContinuumRackProcessor& p) : AudioProcessorEditor (p), rack (p)
+{
+    setLookAndFeel (&lnf);
+    native = std::make_unique<NativeRackView> (p);
+    addChildComponent (*native);
+#if JUCE_WEB_BROWSER
+    web = std::make_unique<WebRackView> (p);
+    addChildComponent (*web);
+    switchButton.onClick = [this] { showView (rack.editorView.load() == 0 ? 1 : 0); };
+    switchButton.setTooltip ("Switch between the web rack and the compact native panel");
+    addAndMakeVisible (switchButton);
+#endif
+    setResizable (true, true);
+    setResizeLimits (800, 500, 4000, 3000);
+    setSize (1440, 900);
+    showView (hasWebView() ? rack.editorView.load() : 1);
+}
+
+ContinuumRackEditor::~ContinuumRackEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+bool ContinuumRackEditor::hasWebView() const noexcept { return web != nullptr; }
+
+void ContinuumRackEditor::showView (int view)
+{
+    if (! hasWebView()) view = 1;
+    rack.editorView.store (view);
+    if (web != nullptr) web->setVisible (view == 0);
+    native->setVisible (view == 1);
+    switchButton.setButtonText (view == 0 ? "NATIVE PANEL" : "WEB RACK");
+    switchButton.toFront (false);
+    resized();
+}
+
+void ContinuumRackEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (bg);
+}
+
+void ContinuumRackEditor::resized()
+{
+    const auto area = getLocalBounds();
+    if (web != nullptr) web->setBounds (area);
+    // the native panel keeps its layout and scales to the window
+    const float scale = juce::jmin (area.getWidth() / (float) NativeRackView::designWidth, area.getHeight() / (float) NativeRackView::designHeight);
+    native->setBounds (0, 0, NativeRackView::designWidth, NativeRackView::designHeight);
+    native->setTransform (juce::AffineTransform::scale (scale).translated ((area.getWidth() - NativeRackView::designWidth * scale) * 0.5f, 0.0f));
+    switchButton.setBounds (area.getRight() - 124, area.getBottom() - 30, 116, 24);
 }

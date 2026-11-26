@@ -536,6 +536,7 @@ void RackEngine::prepare (double sampleRate, int maxBlockSize)
     master->dr.assign (dlen, 0.0f);
     master->comp.prepare (sr);
     master->comp.setPreDelay (getLatencySamples());
+    for (auto& sc : slotScratch) sc.assign ((size_t) maxBlock, 0.0f);
     lfoBuf.assign ((size_t) maxBlock, 0.0f);
     tremBuf.assign ((size_t) maxBlock, 0.0f);
     reset();
@@ -568,6 +569,50 @@ void RackEngine::reset()
     lfoPhase = tremPhase = 0;
     internalTick = 0; internalPhase = 0; internalWasRunning = false;
     sustainDown = false; heldBySustain.fill (false);
+    numUiNotes = 0;
+}
+
+void RackEngine::panic() noexcept
+{
+    for (auto& v : voices) v.active = false;
+    if (master)
+    {
+        std::fill (master->dl.begin(), master->dl.end(), 0.0f);
+        std::fill (master->dr.begin(), master->dr.end(), 0.0f);
+    }
+    sustainDown = false; heldBySustain.fill (false);
+}
+
+bool RackEngine::queueUiNote (const UiNote& n) noexcept
+{
+    if (numUiNotes >= (int) uiNotes.size()) return false;
+    uiNotes[(size_t) numUiNotes++] = n;
+    return true;
+}
+
+void RackEngine::triggerLikeWeb (int midi, double duration, int onlyBank, int onlySlot, float velocity) noexcept
+{
+    // the web app's trigger(): every enabled engine (at most 64), optionally one bank or slot;
+    // when that bank or slot is off, its (first) engine plays anyway
+    int count = 0;
+    for (int b = 0; b < numBanks; ++b)
+        for (int s = 0; s < numSlots; ++s)
+        {
+            if (! program->state.banks[(size_t) b].slots[(size_t) s].on) continue;
+            if (onlyBank >= 0 && (onlyBank != b || (onlySlot >= 0 && onlySlot != s))) continue;
+            if (count++ >= 64) continue;
+            startVoice (b, s, midi, duration, velocity, 0, uiNoteId, false);
+        }
+    if (count == 0 && onlyBank >= 0 && onlyBank < numBanks)
+        startVoice (onlyBank, onlySlot >= 0 ? onlySlot : 0, midi, duration, velocity, 0, uiNoteId, false);
+}
+
+void RackEngine::stopUiNotes() noexcept
+{
+    for (auto& v : voices)
+        if (v.active && v.note == uiNoteId && v.offS == never) v.noteOff (v.age);
+    for (auto& v : voices)   // drones are long one-shots: cut them to their release
+        if (v.active && v.note == uiNoteId && ! v.released && v.age < v.offS) { v.offS = std::max (v.age, 0.0); v.stopS = v.offS + (v.releaseSec + 0.08) * v.sr; }
 }
 
 int RackEngine::countActiveVoices() const noexcept
@@ -625,6 +670,7 @@ void RackEngine::runStep (int64_t tick, int offset, double bpm, const LiveParams
 {
     const auto& st = program->state;
     const double beat = 60.0 / clampv (bpm, 40.0, 240.0) / 4.0;
+    lastTick.store (tick, std::memory_order_relaxed);
     for (int b = 0; b < numBanks; ++b)
     {
         const auto& p = st.patterns[(size_t) b];
@@ -726,6 +772,8 @@ void RackEngine::process (float* left, float* right, int n, const LiveParams& lp
                 if (ev.note >= 0 && ev.note < 128)
                 {
                     heldBySustain[(size_t) ev.note] = false;
+                    lastMidiNote.store (ev.note, std::memory_order_relaxed);
+                    midiNoteCount.fetch_add (1, std::memory_order_relaxed);
                     if (opt.midiGate == MidiGate::gated) releaseNote (ev.note, off);   // retrigger
                     midiNote (ev.note, ev.velocity, off, opt);
                 }
@@ -750,25 +798,23 @@ void RackEngine::process (float* left, float* right, int n, const LiveParams& lp
         }
     }
 
-    // Sequencer clock
-    const bool hostClock = opt.seqMode == SeqMode::host && tr.hasPosition;
-    usingHostClock.store (hostClock, std::memory_order_relaxed);
+    // Sequencer clock: the host's song position while the host plays; otherwise the internal
+    // clock while Run is on (so RUN SEQ also works with the host stopped).
+    const bool hostValid = tr.hasPosition && tr.bpm > 0 && std::isfinite (tr.bpm) && std::isfinite (tr.ppq) && std::abs (tr.ppq) < 1e12;
+    const bool hostClock = opt.seqMode == SeqMode::host && hostValid && tr.playing;
+    usingHostClock.store (opt.seqMode == SeqMode::host && hostValid, std::memory_order_relaxed);
     if (hostClock)
     {
         internalWasRunning = false;
-        if (tr.playing && tr.bpm > 0 && std::isfinite (tr.bpm) && std::isfinite (tr.ppq) && std::abs (tr.ppq) < 1e12)
+        const double ppqPerSample = tr.bpm / 60.0 / sr;
+        const double startSix = tr.ppq * 4, endSix = (tr.ppq + n * ppqPerSample) * 4;
+        // pre-roll (negative positions) plays nothing; start at the first 16th at or after zero
+        for (int64_t k = std::max<int64_t> (0, (int64_t) std::ceil (startSix - 1e-9)); (double) k < endSix - 1e-9; ++k)
         {
-            const double ppqPerSample = tr.bpm / 60.0 / sr;
-            const double startSix = tr.ppq * 4, endSix = (tr.ppq + n * ppqPerSample) * 4;
-            // pre-roll (negative positions) plays nothing; start at the first 16th at or after zero
-            for (int64_t k = std::max<int64_t> (0, (int64_t) std::ceil (startSix - 1e-9)); (double) k < endSix - 1e-9; ++k)
-            {
-                const int off = clampv ((int) std::lround ((k - startSix) / 4.0 / ppqPerSample), 0, n - 1);
-                runStep (k, off, tr.bpm, lp);
-            }
+            const int off = clampv ((int) std::lround ((k - startSix) / 4.0 / ppqPerSample), 0, n - 1);
+            runStep (k, off, tr.bpm, lp);
         }
-        else
-            for (auto& p : playStep) p.store (-1, std::memory_order_relaxed);
+        seqRunning.store (true, std::memory_order_relaxed);
     }
     else if (opt.seqMode != SeqMode::off && opt.internalRun)
     {
@@ -782,19 +828,46 @@ void RackEngine::process (float* left, float* right, int n, const LiveParams& lp
             pos += stepSamples;
         }
         internalPhase = pos - n;
+        seqRunning.store (true, std::memory_order_relaxed);
     }
     else
     {
         internalWasRunning = false;
+        seqRunning.store (false, std::memory_order_relaxed);
         for (auto& p : playStep) p.store (-1, std::memory_order_relaxed);
     }
 
-    // Voices
+    // Notes from the editor (keys, audition, PLAY BANK, factory drone)
+    for (int u = 0; u < numUiNotes; ++u)
+    {
+        const auto& un = uiNotes[(size_t) u];
+        if (un.bank >= 0 && un.slot >= 0 && un.force)
+            startVoice (un.bank, un.slot, un.midi, un.duration, un.velocity, 0, uiNoteId, false);
+        else
+            triggerLikeWeb (un.midi, un.duration, un.bank, un.slot, un.velocity);
+    }
+    numUiNotes = 0;
+
+    // Voices. Voices of the bank shown on the editor's octoscope also go through a per-slot
+    // scratch buffer so their waveforms can be displayed.
+    const int sb = scopeBank.load (std::memory_order_relaxed);
+    for (auto& sc : slotScratch) std::fill (sc.begin(), sc.begin() + n, 0.0f);
     int active = 0;
     for (auto& v : voices)
     {
         if (! v.active) continue;
-        if (v.render (buses[(size_t) v.bank].mono.data(), n)) ++active;
+        const bool scoped = v.bank == sb;
+        if (v.render (scoped ? slotScratch[(size_t) v.slot].data() : buses[(size_t) v.bank].mono.data(), n)) ++active;
+    }
+    if (sb >= 0 && sb < numBanks)
+    {
+        auto& mono = buses[(size_t) sb].mono;
+        for (int s = 0; s < numSlots; ++s)
+        {
+            const auto& sc = slotScratch[(size_t) s];
+            for (int i = 0; i < n; ++i) mono[(size_t) i] += sc[(size_t) i];
+            scopes.writeSlot (s, sc.data(), n);
+        }
     }
     activeVoices.store (active, std::memory_order_relaxed);
 
@@ -939,6 +1012,7 @@ void RackEngine::process (float* left, float* right, int n, const LiveParams& lp
             peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
         }
     }
+    scopes.writeMaster (left, right, n);
     if (! std::isfinite (peak)) peak = 0;
     masterPeak.store (std::max (peak, masterPeak.load (std::memory_order_relaxed) * 0.9f), std::memory_order_relaxed);
 }

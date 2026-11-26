@@ -175,6 +175,15 @@ void testHostSequencer (WaveLibrary& lib)
     rig.run (1.0);
     check (rig.hits (0, 0) == before, "stopped host transport triggers no steps");
 
+    // RUN with the host stopped plays from the internal clock; host play takes over again.
+    rig.opt.internalRun = true;
+    const auto r0 = rig.hits (0, 0);
+    rig.run (1.0);
+    check (rig.hits (0, 0) > r0 && rig.engine.seqRunning.load(), "Run plays while the host is stopped");
+    rig.opt.internalRun = false;
+    rig.run (0.05);
+    check (! rig.engine.seqRunning.load(), "Run off: sequencer idle");
+
     // Loop wrap: jumping back to 0 retriggers step 1.
     rig.tr = { true, true, 3.9, 120.0 };
     const auto h0 = rig.hits (0, 0);
@@ -240,6 +249,45 @@ void testArp (WaveLibrary& lib)
     rig.opt.seqMode = SeqMode::internal; rig.opt.internalRun = true;
     rig.run (0.5);
     check (rig.hits (0, 0) >= 3, "arp steps trigger");
+}
+
+void testUiNotesAndScopes (WaveLibrary& lib)
+{
+    auto s = silentRack();
+    s.banks[1].slots[2].on = true;
+    s.banks[1].slots[5].on = true;
+    s.banks[3].slots[0].on = true;
+    Rig rig (lib, s);
+    rig.engine.scopeBank.store (1);
+    UiNote n; n.midi = 60; n.duration = 0.42;
+    rig.engine.queueUiNote (n);           // whole rack: three engines
+    rig.run (0.01);
+    check (rig.engine.countActiveVoices() == 3, "editor note plays every enabled engine");
+    n.bank = 3; rig.engine.queueUiNote (n);
+    rig.run (0.01);
+    check (rig.hits (3, 0) == 2 && rig.hits (1, 2) == 1, "PLAY BANK plays only that bank");
+    n.bank = 6; n.slot = 4; rig.engine.queueUiNote (n);
+    rig.run (0.01);
+    check (rig.hits (6, 4) == 1, "auditioning a switched-off slot plays it anyway, like the web app");
+    rig.run (0.2);
+    float w[512];
+    rig.engine.scopes.readSlot (2, w, 512);
+    float pk = 0; for (float x : w) pk = std::max (pk, std::abs (x));
+    rig.engine.scopes.readSlot (0, w, 512);
+    float quiet = 0; for (float x : w) quiet = std::max (quiet, std::abs (x));
+    check (pk > 1e-4 && quiet == 0, "octoscope tap shows the scoped bank's sounding slot only");
+    rig.engine.scopes.readMaster (w, 512);
+    pk = 0; for (float x : w) pk = std::max (pk, std::abs (x));
+    check (pk > 1e-4, "master scope tap carries the output");
+    rig.engine.panic();
+    rig.run (0.01);
+    check (rig.engine.countActiveVoices() == 0, "panic stops every voice");
+    n = UiNote {}; n.bank = 1; n.slot = 2; n.duration = 90; n.force = true;
+    rig.engine.queueUiNote (n);
+    rig.run (0.05);
+    rig.engine.stopUiNotes();
+    rig.run (1.5);
+    check (rig.engine.countActiveVoices() == 0, "stopping editor notes ends a 90 s drone");
 }
 
 void testSendsAndLfo (WaveLibrary& lib)
@@ -367,6 +415,7 @@ int main (int argc, char** argv)
         testHostSequencer (lib);
         testInternalClock (lib);
         testArp (lib);
+        testUiNotesAndScopes (lib);
         testSendsAndLfo (lib);
         testAllEnginesAndStress (lib);
 #if RACK_HAVE_ZLIB

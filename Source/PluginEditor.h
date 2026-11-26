@@ -16,7 +16,8 @@ public:
     juce::Font getLabelFont (juce::Label&) override;
 };
 
-class ContinuumRackEditor;
+class NativeRackView;
+class WebRackView;
 
 // One labelled knob bound to a host parameter.
 struct RackKnob
@@ -49,14 +50,14 @@ private:
 class SlotButton final : public juce::Component
 {
 public:
-    SlotButton (ContinuumRackEditor&, int bank, int slot);
+    SlotButton (NativeRackView&, int bank, int slot);
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void setSlot (bool on, int type);
     void flash();
     void tick();
 private:
-    ContinuumRackEditor& editor;
+    NativeRackView& editor;
     int bank, slot;
     bool on = false;
     int type = 0;
@@ -79,15 +80,16 @@ private:
 class BankRow final : public juce::Component
 {
 public:
-    BankRow (ContinuumRackEditor&, int bank);
+    BankRow (NativeRackView&, int bank);
     void resized() override;
     void paint (juce::Graphics&) override;
     void update (const crack::RackState&);
     void tick();
 
 private:
-    friend class ContinuumRackEditor;
-    ContinuumRackEditor& editor;
+    friend class NativeRackView;
+class WebRackView;
+    NativeRackView& editor;
     int bank;
     juce::Colour colour;
     RackKnob level, pan, cutoff;
@@ -100,11 +102,13 @@ private:
     std::array<uint32_t, crack::numSlots> lastHits {};
 };
 
-class ContinuumRackEditor final : public juce::AudioProcessorEditor, private juce::Timer
+// The compact native panel: every host parameter, scenes, slots and step view.
+class NativeRackView final : public juce::Component, private juce::Timer
 {
 public:
-    explicit ContinuumRackEditor (ContinuumRackProcessor&);
-    ~ContinuumRackEditor() override;
+    static constexpr int designWidth = 1200, designHeight = 760;
+    explicit NativeRackView (ContinuumRackProcessor&);
+    ~NativeRackView() override;
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -130,6 +134,29 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     uint32_t shownSerial = 0;
     juce::Rectangle<int> clockArea, masterArea, echoArea, lfoArea, routerArea, midiArea, banksArea;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NativeRackView)
+};
+
+// The plugin window: the web rack (the Continuum Rack page itself) or the native panel,
+// switched with the button in the bottom-right corner.
+class ContinuumRackEditor final : public juce::AudioProcessorEditor
+{
+public:
+    explicit ContinuumRackEditor (ContinuumRackProcessor&);
+    ~ContinuumRackEditor() override;
+    void resized() override;
+    void paint (juce::Graphics&) override;
+
+    bool hasWebView() const noexcept;
+    void showView (int view);   // 0 = web rack, 1 = native
+
+private:
+    ContinuumRackProcessor& rack;
+    RackLookAndFeel lnf;
+    std::unique_ptr<NativeRackView> native;
+    std::unique_ptr<WebRackView> web;
+    juce::TextButton switchButton;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ContinuumRackEditor)
 };

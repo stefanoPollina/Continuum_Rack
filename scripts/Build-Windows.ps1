@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$JucePath = "", [ValidateRange(1,64)][int]$Jobs = 2)
+param([string]$JucePath = "", [ValidateRange(1,64)][int]$Jobs = 2, [switch]$NoWebUI)
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $ProjectRoot "build-windows"
@@ -28,9 +28,31 @@ try {
     if ([version]$Matches[1] -lt [version]"3.24.0") { throw "CMake 3.24+ is required; found $VersionLine." }
     $CTest = Join-Path (Split-Path -Parent $CMake) "ctest.exe"
     if (-not (Test-Path -LiteralPath $CTest)) { throw "ctest.exe must be beside cmake.exe." }
+    # The web rack view uses Microsoft Edge WebView2. JUCE links its loader statically from the
+    # WebView2 SDK NuGet package, fetched once into build-windows\webview2.
+    $WebUI = "ON"
+    $WebView2Dir = Join-Path $BuildDir "webview2"
+    if ($NoWebUI) { $WebUI = "OFF" }
+    else {
+        $WebView2Version = "1.0.3485.44"
+        $Package = Join-Path $WebView2Dir "Microsoft.Web.WebView2.$WebView2Version"
+        if (-not (Test-Path -LiteralPath (Join-Path $Package "build\native\include\WebView2.h"))) {
+            Write-Host "Downloading the WebView2 SDK package $WebView2Version from nuget.org."
+            New-Item -ItemType Directory -Path $Package -Force | Out-Null
+            $Archive = Join-Path $WebView2Dir "webview2-$WebView2Version.zip"
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$WebView2Version" -OutFile $Archive -UseBasicParsing
+                Expand-Archive -LiteralPath $Archive -DestinationPath $Package -Force
+            } catch {
+                throw "Could not download the WebView2 SDK ($($_.Exception.Message)). Run scripts\Build-Windows.ps1 -NoWebUI to build with the native panel only."
+            }
+        }
+    }
     $Configure = @("-S", $ProjectRoot, "-B", $BuildDir, "-G", "Visual Studio 17 2022", "-A", "x64",
                    "-DCMAKE_GENERATOR_INSTANCE=$VsPath", "-DBUILD_TESTING=ON",
-                   "-DRACK_BUILD_PLUGIN=ON", "-DRACK_JUCE_PATH=$JucePath")
+                   "-DRACK_BUILD_PLUGIN=ON", "-DRACK_JUCE_PATH=$JucePath",
+                   "-DRACK_WEB_UI=$WebUI", "-DRACK_WEBVIEW2_PACKAGE_DIR=$WebView2Dir")
     Write-Host "Configuring Continuum Rack. The first build downloads pinned JUCE 8.0.12."
     Run-Checked -Program $CMake -Arguments $Configure
     Run-Checked -Program $CMake -Arguments @("--build", $BuildDir, "--config", "Release", "--parallel", "$Jobs")
