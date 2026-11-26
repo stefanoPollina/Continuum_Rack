@@ -8,7 +8,7 @@ class NativeRackView;
 class WebRackView;
 
 // The plugin window. It shows the Continuum Rack in one of two ways, switched with the
-// button in the bottom-right corner (the choice is saved with the project):
+// button in the bar along the bottom (the choice is saved with the project):
 //   WEB RACK    - the Continuum Rack web page itself, in a WebView, driving the C++ engine
 //   NATIVE RACK - the same rack redrawn natively in JUCE
 class ContinuumRackEditor final : public juce::AudioProcessorEditor
@@ -35,6 +35,8 @@ private:
     std::unique_ptr<NativeRackView> native;
     std::unique_ptr<WebRackView> web;
     juce::TextButton switchButton;
+    juce::Label viewLabel;
+    static constexpr int barHeight = 30;   // the switch lives in its own strip: a WebView covers anything drawn over it
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ContinuumRackEditor)
 };

@@ -32,7 +32,11 @@ ContinuumRackEditor::ContinuumRackEditor (ContinuumRackProcessor& p) : AudioProc
     switchButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff141414));
     switchButton.setTooltip ("Switch between the web rack and the native rack");
     switchButton.onClick = [this] { showView (rack.editorView.load() == 0 ? 1 : 0); };
-    if (web != nullptr) addAndMakeVisible (switchButton);
+    addAndMakeVisible (switchButton);
+    switchButton.setEnabled (web != nullptr);
+    viewLabel.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    viewLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb8b8b0));
+    addAndMakeVisible (viewLabel);
 
     setResizable (true, true);
     setResizeLimits (800, 500, 4000, 3000);
@@ -53,20 +57,29 @@ void ContinuumRackEditor::showView (int view)
     rack.editorView.store (view);
     if (web != nullptr) web->setVisible (view == 0);
     native->setVisible (view == 1);
-    switchButton.setButtonText (view == 0 ? "NATIVE RACK" : "WEB RACK");
-    switchButton.toFront (false);
+    switchButton.setButtonText (view == 0 ? juce::String ("SWITCH TO NATIVE RACK") : hasWebView() ? juce::String ("SWITCH TO WEB RACK") : juce::String ("WEB RACK UNAVAILABLE"));
+    viewLabel.setText (juce::String::fromUTF8 (view == 0 ? "CONTINUUM RACK  \xc2\xb7  WEB RACK (your page, played by the plugin engine)"
+                                                          : "CONTINUUM RACK  \xc2\xb7  NATIVE RACK"),
+                       juce::dontSendNotification);
     resized();
 }
 
 void ContinuumRackEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff202020));
+    auto bar = getLocalBounds().removeFromBottom (barHeight);
+    g.setColour (juce::Colour (0xff141513));
+    g.fillRect (bar);
+    g.setColour (juce::Colour (0xffff9000));
+    g.fillRect (bar.removeFromTop (2));
 }
 
 void ContinuumRackEditor::resized()
 {
-    const auto area = getLocalBounds();
+    auto area = getLocalBounds();
+    auto bar = area.removeFromBottom (barHeight).withTrimmedTop (2);
     if (web != nullptr) web->setBounds (area);
     native->setBounds (area);
-    switchButton.setBounds (area.getRight() - 132, area.getBottom() - 34, 112, 24);
+    switchButton.setBounds (bar.removeFromRight (190).reduced (4, 3));
+    viewLabel.setBounds (bar.reduced (8, 0));
 }
