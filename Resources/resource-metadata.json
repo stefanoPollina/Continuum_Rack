@@ -1,0 +1,14 @@
+{
+ "source": "stefanoPollina/Hybrid index.html",
+ "sha256": "b15aba4a379b4873c5748ea437f15b41690bca38a7f0de590b974a63efb754a0",
+ "scenes": 48,
+ "tables": 131,
+ "framesPerTable": 17,
+ "harmonics": 512,
+ "tablesUsedByScenes": [
+  "WT305"
+ ],
+ "enginePatches": 76,
+ "quantisation": "int16 per frame, peak-relative",
+ "maxRelativeQuantisationError": 0.000015259252236194568
+}
