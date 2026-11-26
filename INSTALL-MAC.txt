@@ -1,0 +1,15 @@
+Continuum Rack - macOS (Apple Silicon and Intel)
+
+1. Copy the plugins into your plug-in folders (Finder: Go > Go to Folder...):
+      "Continuum Rack.vst3"       ->  ~/Library/Audio/Plug-Ins/VST3
+      "Continuum Rack.component"  ->  ~/Library/Audio/Plug-Ins/Components   (Logic, GarageBand)
+   "Continuum Rack.app" is a standalone version: drag it into Applications.
+2. This early build is not signed by Apple yet, so macOS blocks it until you allow it once.
+   Open Terminal and paste:
+      xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Continuum Rack.vst3" ~/Library/Audio/Plug-Ins/Components/"Continuum Rack.component" /Applications/"Continuum Rack.app"
+   (For the app alone you can instead open it, then System Settings > Privacy & Security > Open Anyway.)
+3. Rescan plugins in your DAW. Ableton Live: Settings > Plug-Ins > Rescan.
+   Logic: it checks the Audio Unit on its next start.
+4. Put Continuum Rack on a MIDI / instrument track and press play.
+
+The orange button bottom-right switches between the WEB RACK and the NATIVE RACK.

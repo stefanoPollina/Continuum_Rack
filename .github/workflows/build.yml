@@ -1,8 +1,9 @@
 name: Build plugin
 
 # Builds the Windows VST3 + standalone app (and the macOS VST3/AU/app) on every push,
-# runs the tests, and attaches the results to the run. Pushing a tag like v0.2.0 also
-# publishes them as a GitHub release.
+# runs the tests, and attaches the results to the run. Every push to main also publishes both
+# zips as a GitHub release (v0.2.0.<run number>), which the download page links to; pushing a
+# tag like v0.2.0 publishes them under that tag.
 on:
   push:
     branches: [main]
@@ -107,6 +108,7 @@ jobs:
           cp -R "build/ContinuumRack_artefacts/Release/VST3/Continuum Rack.vst3" "$out/"
           cp -R "build/ContinuumRack_artefacts/Release/AU/Continuum Rack.component" "$out/"
           cp -R "build/ContinuumRack_artefacts/Release/Standalone/Continuum Rack.app" "$out/"
+          cp INSTALL-MAC.txt "$out/"
           (cd dist && zip -qry Continuum-Rack-macOS.zip "Continuum Rack (macOS)")
       - uses: actions/upload-artifact@v4
         with:
@@ -117,3 +119,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Continuum-Rack-macOS.zip
+
+  release:
+    # every push to main: both zips as the newest release, for the download page
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2.0.${{ github.run_number }}
+          name: Continuum Rack 0.2.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Continuum Rack plugin, built from ${{ github.sha }}.
+            - Windows: Continuum-Rack-Windows-x64.zip (VST3 + standalone app)
+            - macOS: Continuum-Rack-macOS.zip (VST3 + Audio Unit + standalone app, Apple Silicon and Intel)
+          files: |
+            dist/Continuum-Rack-Windows-x64.zip
+            dist/Continuum-Rack-macOS.zip
