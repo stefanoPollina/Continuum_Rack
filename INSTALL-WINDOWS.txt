@@ -1,0 +1,13 @@
+Continuum Rack - Windows x64
+
+1. Copy the whole "Continuum Rack.vst3" folder into
+      C:\Program Files\Common Files\VST3
+2. Ableton Live: Settings > Plug-Ins > turn on "Use VST3 Plug-in System Folder" > Rescan.
+   FL Studio: Options > Manage plugins > Find installed plugins.
+3. Put Continuum Rack on a MIDI / instrument track and press play.
+
+"Continuum Rack.exe" is a standalone version for a quick listen without a DAW.
+
+The WEB RACK view uses Microsoft Edge WebView2, which Windows 10 and 11 already include.
+The orange button bottom-right switches to the NATIVE RACK.
+This build is not code-signed, so Windows may ask you to confirm the first time.

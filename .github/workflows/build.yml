@@ -1,0 +1,119 @@
+name: Build plugin
+
+# Builds the Windows VST3 + standalone app (and the macOS VST3/AU/app) on every push,
+# runs the tests, and attaches the results to the run. Pushing a tag like v0.2.0 also
+# publishes them as a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  JUCE_COMMIT: 29396c22c93392d6738e021b83196283d6e4d850
+  WEBVIEW2_VERSION: 1.0.3485.44
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE and WebView2
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/JUCE
+            deps/webview2
+          key: deps-${{ env.JUCE_COMMIT }}-${{ env.WEBVIEW2_VERSION }}
+
+      - name: Fetch JUCE 8.0.12 and the WebView2 SDK
+        shell: pwsh
+        run: |
+          if (-not (Test-Path deps/JUCE/CMakeLists.txt)) {
+            git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE deps/JUCE
+            if ((git -C deps/JUCE rev-parse HEAD) -ne $env:JUCE_COMMIT) { throw "JUCE tag does not match the pinned commit" }
+          }
+          $pkg = "deps/webview2/Microsoft.Web.WebView2.$env:WEBVIEW2_VERSION"
+          if (-not (Test-Path "$pkg/build/native/include/WebView2.h")) {
+            New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+            Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$env:WEBVIEW2_VERSION" -OutFile deps/webview2.zip
+            Expand-Archive deps/webview2.zip -DestinationPath $pkg -Force
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DBUILD_TESTING=ON -DRACK_BUILD_PLUGIN=ON -DRACK_WEB_UI=ON
+          -DRACK_JUCE_PATH="${{ github.workspace }}/deps/JUCE"
+          -DRACK_WEBVIEW2_PACKAGE_DIR="${{ github.workspace }}/deps/webview2"
+          -DRACK_BUILD_HOST_CHECK=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        env:
+          CONTINUUM_RACK_NO_WEBVIEW: "1"   # CI has no desktop session for a WebView
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "dist/Continuum Rack (Windows x64)"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -Recurse "build/ContinuumRack_artefacts/Release/VST3/Continuum Rack.vst3" $out
+          Copy-Item "build/ContinuumRack_artefacts/Release/Standalone/Continuum Rack.exe" $out
+          Copy-Item INSTALL-WINDOWS.txt $out
+          Compress-Archive -Path "$out/*" -DestinationPath "dist/Continuum-Rack-Windows-x64.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Continuum-Rack-Windows-x64
+          path: dist/Continuum-Rack-Windows-x64.zip
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Continuum-Rack-Windows-x64.zip
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch JUCE 8.0.12
+        run: git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE deps/JUCE
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Xcode -DBUILD_TESTING=ON -DRACK_WEB_UI=ON
+          -DRACK_JUCE_PATH="$GITHUB_WORKSPACE/deps/JUCE"
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      - name: Build
+        run: cmake --build build --config Release --parallel 4 -- -quiet
+      - name: Test
+        env:
+          CONTINUUM_RACK_NO_WEBVIEW: "1"
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: |
+          out="dist/Continuum Rack (macOS)"
+          mkdir -p "$out"
+          cp -R "build/ContinuumRack_artefacts/Release/VST3/Continuum Rack.vst3" "$out/"
+          cp -R "build/ContinuumRack_artefacts/Release/AU/Continuum Rack.component" "$out/"
+          cp -R "build/ContinuumRack_artefacts/Release/Standalone/Continuum Rack.app" "$out/"
+          (cd dist && zip -qry Continuum-Rack-macOS.zip "Continuum Rack (macOS)")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Continuum-Rack-macOS
+          path: dist/Continuum-Rack-macOS.zip
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Continuum-Rack-macOS.zip

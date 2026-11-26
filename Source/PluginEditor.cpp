@@ -21,8 +21,12 @@ ContinuumRackEditor::ContinuumRackEditor (ContinuumRackProcessor& p) : AudioProc
     native = std::make_unique<NativeRackView> (p);
     addChildComponent (*native);
 #if JUCE_WEB_BROWSER
-    web = std::make_unique<WebRackView> (p);
-    addChildComponent (*web);
+    // CONTINUUM_RACK_NO_WEBVIEW is set by the CI tests, which run without a desktop session
+    if (juce::SystemStats::getEnvironmentVariable ("CONTINUUM_RACK_NO_WEBVIEW", {}).isEmpty())
+    {
+        web = std::make_unique<WebRackView> (p);
+        addChildComponent (*web);
+    }
 #endif
     switchButton.setLookAndFeel (&look);
     switchButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff141414));
