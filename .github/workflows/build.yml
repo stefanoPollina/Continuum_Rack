@@ -84,7 +84,7 @@ jobs:
           files: dist/Continuum-Rack-Windows-x64.zip
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Fetch JUCE 8.0.12
